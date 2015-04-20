@@ -3,64 +3,6 @@ import select
 
 TCP_CONNECT_TIMEOUT = 3
 
-class TCPConn():
-    def __init__(self, sock):
-        self.sock = sock
-        self.buf = b''
-    
-    def recv(self):
-        self.buf = self.buf + self.sock.recv(4096)
-        return len(self.buf)
-        
-    def send(self, msg):
-        self.sock.sendall( msg ) 
-        
-    def cut_buf(self, cut_len ):
-        if cut_len < len(self.buf):
-            self.buf = self.buf[cut_len:]
-        else:
-            self.buf = b''
-
-class TCPConnPair():
-    def __init__ (self):
-        self.connections = []
-        self._socks = []
-
-    def conn_add(self, tcpconn):
-        self.connections.append( tcpconn )
-        self._socks.append( tcpconn.sock )
-    
-    @property
-    def socks(self):
-        return None
-     
-    @socks.getter    
-    def socks(self):
-        if len(self._socks) == 1:
-            return []
-        return self._socks
-    
-    def recv(self, sock):
-        if sock is self.connections[0].sock:
-            conn = self.connections[0]
-            send_conn = self.connections[1]
-        else:
-            conn = self.connections[1]
-            send_conn = self.connections[0]
-        
-        msg_len = conn.recv()
-        if msg_len != 0:
-            send_conn.send( conn.buf )
-            conn.cut_buf( msg_len )
-        else:
-            return False
-        return True
-    
-    def close(self):
-        for conn in self.connections:
-            self._socks.remove( conn.sock )
-            conn.sock.close()
-    
 class ConnPairs():
     def __init__(self):
         self.pairs = []
@@ -82,12 +24,23 @@ class ConnPairs():
         return self.sock_index[sock]
         
 
-class TCPProxy():
-    def __init__(self, listen_addr, listen_port, connect_addr, connect_port ):
+class ConnProxy():
+    def __init__(self, listen_addr, listen_port, connect_addr, connect_port,
+            conn, connpair ):
         self.listen_addr = listen_addr
         self.listen_port = listen_port
         self.connect_addr = connect_addr
         self.connect_port = connect_port
+        
+        if conn is None:
+            self.conn = TCPConn
+        else:
+            self.conn = conn
+        
+        if connpair is None:
+            self.connpair = TCPConnPair
+        else:
+            self.connpair = connpair
 
         self.read_socks = []
         self.pairs = ConnPairs()
@@ -112,18 +65,19 @@ class TCPProxy():
                         self.on_close( pair )
                     
     def on_accept(self, sock):
-        newpair = TCPConnPair()
+        newpair = self.connpair()
 
         clientsock, address = sock.accept()
-        newpair.conn_add( TCPConn( clientsock ) )
+        newpair.conn_add( self.conn( clientsock ) )
        
         try: 
-            sock_connect = socket.create_connection( (self.connect_addr, self.connect_port), TCP_CONNECT_TIMEOUT )
+            sock_connect = socket.create_connection(
+                (self.connect_addr, self.connect_port), TCP_CONNECT_TIMEOUT )
         except OSError as msg:
             self.on_close( newpair )
             return
 
-        newpair.conn_add( TCPConn( sock_connect ) )
+        newpair.conn_add( self.conn( sock_connect ) )
         
         self.pairs.add( newpair )
         self.read_socks.extend( newpair.socks )
@@ -134,5 +88,4 @@ class TCPProxy():
                 self.read_socks.remove( sock )
 
         pair.close()
-
         self.pairs.remove( pair )

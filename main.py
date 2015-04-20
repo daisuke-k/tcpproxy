@@ -1,7 +1,10 @@
 #!/usr/bin/python
 
 import argparse
-from tcpproxy import *
+
+import proxy
+import tcp
+
 
 def port_expression( string ):
     separated = string.rsplit(":", 1)
@@ -17,7 +20,8 @@ if __name__ == '__main__':
                         type=port_expression, metavar="[IP address]:[port]" )
     args = parser.parse_args()
     
-    proxy = TCPProxy( args.listen[0], args.listen[1], args.connect[0], args.connect[1])
+    proxy = proxy.ConnProxy( args.listen[0], args.listen[1], args.connect[0],
+                             args.connect[1], tcp.TCPConn, tcp.TCPConnPair )
     
     proxy.start()
     proxy.run()
