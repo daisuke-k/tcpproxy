@@ -1,46 +1,82 @@
 import socket
 import select
 
+TCP_CONNECT_TIMEOUT = 3
+
+class TCPConn():
+    def __init__(self, sock):
+        self.sock = sock
+        self.buf = b''
+    
+    def recv(self):
+        self.buf = self.buf + self.sock.recv(4096)
+        return len(self.buf)
+        
+    def send(self, msg):
+        self.sock.sendall( msg ) 
+        
+    def cut_buf(self, cut_len ):
+        if cut_len < len(self.buf):
+            self.buf = self.buf[cut_len:]
+        else:
+            self.buf = b''
+
 class TCPConnPair():
     def __init__ (self):
         self.connections = []
+        self._socks = []
 
-    def sock_add(self, sock):
-        self.connections.append( sock )
-        
+    def conn_add(self, tcpconn):
+        self.connections.append( tcpconn )
+        self._socks.append( tcpconn.sock )
+    
+    @property
     def socks(self):
-        if len(self.connections) != 2:
+        return None
+     
+    @socks.getter    
+    def socks(self):
+        if len(self._socks) == 1:
             return []
-        return self.connections
+        return self._socks
     
     def recv(self, sock):
-        send_sock = self.connections[0] if sock is self.connections[1] else self.connections[1]
+        if sock is self.connections[0].sock:
+            conn = self.connections[0]
+            send_conn = self.connections[1]
+        else:
+            conn = self.connections[1]
+            send_conn = self.connections[0]
         
-        msg = sock.recv(4096)
-        if len(msg) != 0:
-            send_sock.sendall( msg )
+        msg_len = conn.recv()
+        if msg_len != 0:
+            send_conn.send( conn.buf )
+            conn.cut_buf( msg_len )
         else:
             return False
         return True
     
     def close(self):
-        for sock in self.connections:
-            sock.close()
+        for conn in self.connections:
+            self._socks.remove( conn.sock )
+            conn.sock.close()
     
-class TCPConnPairs():
+class ConnPairs():
     def __init__(self):
         self.pairs = []
         self.sock_index = {}
     
     def add(self, pair):
-        self.pairs.append( pair )
-        for sock in pair.socks():
-            self.sock_index[sock] = pair
+        if pair not in self.pairs:
+            self.pairs.append( pair )
+            for sock in pair.socks:
+                self.sock_index[sock] = pair
     
     def remove(self, pair):
-        self.pairs.remove( pair )
-        for sock in pair.socks():
-            del self.sock_index[sock]
+        if pair in self.pairs:
+            self.pairs.remove( pair )
+            for sock in pair.socks:
+                del self.sock_index[sock]
     
     def find_pair(self, sock):
         return self.sock_index[sock]
@@ -54,7 +90,7 @@ class TCPProxy():
         self.connect_port = connect_port
 
         self.read_socks = []
-        self.pairs = TCPConnPairs()
+        self.pairs = ConnPairs()
 
     def start(self):
         self.serversock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
@@ -79,18 +115,24 @@ class TCPProxy():
         newpair = TCPConnPair()
 
         clientsock, address = sock.accept()
-        newpair.sock_add( clientsock )
-        
-        sock_connect = socket.socket( socket.AF_INET, socket.SOCK_STREAM )
-        sock_connect.connect( (self.connect_addr, self.connect_port) )
-        newpair.sock_add( sock_connect )
+        newpair.conn_add( TCPConn( clientsock ) )
+       
+        try: 
+            sock_connect = socket.create_connection( (self.connect_addr, self.connect_port), TCP_CONNECT_TIMEOUT )
+        except OSError as msg:
+            self.on_close( newpair )
+            return
+
+        newpair.conn_add( TCPConn( sock_connect ) )
         
         self.pairs.add( newpair )
-        self.read_socks.extend( newpair.socks() )
-        return
+        self.read_socks.extend( newpair.socks )
     
     def on_close(self, pair ):
+        for sock in pair.socks:
+            if sock in self.read_socks:
+                self.read_socks.remove( sock )
+
         pair.close()
-        for sock in pair.socks():
-            self.read_socks.remove( sock )
+
         self.pairs.remove( pair )

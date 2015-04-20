@@ -1,7 +1,7 @@
 #!/usr/bin/python
 
 import argparse
-from tcpsession import *
+from tcpproxy import *
 
 def port_expression( string ):
     separated = string.rsplit(":", 1)
