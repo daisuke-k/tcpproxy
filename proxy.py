@@ -1,5 +1,6 @@
 import tornado.tcpserver
 import tornado.tcpclient
+import tornado.gen
 
 class StreamPairs():
     def __init__(self):
@@ -23,16 +24,20 @@ class ProxyServer(tornado.tcpserver.TCPServer):
        self.streampairs = streampairs()
        self.tcpclient = tornado.tcpclient.TCPClient()
 
+   @tornado.gen.coroutine
    def handle_stream(self, stream, address ):
         newpair = self.streampair()
         newpair.set_close_handler( self.handle_close )
-
-        newpair.stream_add( self.streamhandler( stream, newpair ) )
-       
-        stream_connect = self.tcpclient.connect( self.connect_addr, self.connect_port )
-        newpair.stream_add( self.streamhandler( stream_connect, newpair ) )
-        
         self.streampairs.add( newpair )
+        
+        stream_handler = self.streamhandler( newpair )
+        newpair.stream_add( stream_handler )
+        stream_handler.set_stream( stream )
+       
+        new_stream_handler = self.streamhandler( newpair )
+        newpair.stream_add( new_stream_handler )
+        stream_connect = yield self.tcpclient.connect( self.connect_addr, self.connect_port )
+        new_stream_handler.set_stream( stream_connect )
     
    def handle_close(self, pair ):
         self.streampairs.remove( pair )

@@ -4,16 +4,15 @@ import logging
 LOG=logging.getLogger(__name__)
 
 class TCPStreamHandler():
-    def __init__(self, stream, streampair ):
+    def __init__(self, streampair ):
         self.streampair = streampair
         self._write_buf = b''
-       
-        if isinstance(stream, tornado.concurrent.Future):
-            tornado.ioloop.IOLoop.current().add_future( stream, self.handle_connection_established )
-            self.stream = None
-        else:
-            self.stream = stream
-            self._set_handlers()
+        self.stream = None
+        
+    def set_stream(self, stream ):
+        self.stream = stream
+        self._set_handlers()
+        self.write()
     
     def handle_connection_established(self, f):
         if f.exception() is not None:
