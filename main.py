@@ -1,6 +1,9 @@
 #!/usr/bin/python
 
 import argparse
+import logging
+
+import tornado.ioloop
 
 import proxy
 import tcp
@@ -13,6 +16,7 @@ def port_expression( string ):
     return [ separated[0], int(separated[1]) ]
 
 if __name__ == '__main__':
+    logging.basicConfig(level=logging.DEBUG)
     parser = argparse.ArgumentParser()
     parser.add_argument("-l", "--listen", help="port to listen", required=True,
                         type=port_expression, metavar="[IP address]:[port]" )
@@ -20,8 +24,8 @@ if __name__ == '__main__':
                         type=port_expression, metavar="[IP address]:[port]" )
     args = parser.parse_args()
     
-    proxy = proxy.ConnProxy( args.listen[0], args.listen[1], args.connect[0],
-                             args.connect[1], tcp.TCPConn, tcp.TCPConnPair )
-    
-    proxy.start()
-    proxy.run()
+    server = proxy.ProxyServer( args.connect[0], args.connect[1], tcp.TCPStreamHandler,
+                         tcp.TCPStreamPair, proxy.StreamPairs )
+    server.listen( args.listen[1], address=args.listen[0] )
+
+    tornado.ioloop.IOLoop.instance().start()

@@ -1,38 +1,73 @@
-import connection
+import tornado.ioloop
+import logging
 
-class TCPConn(connection.Conn):
-    def __init__(self, sock):
-        connection.Conn.__init__(self, sock )
-        self.buf = b''
+LOG=logging.getLogger(__name__)
+
+class TCPStreamHandler():
+    def __init__(self, stream, streampair ):
+        self.streampair = streampair
+        self._write_buf = b''
+       
+        if isinstance(stream, tornado.concurrent.Future):
+            tornado.ioloop.IOLoop.current().add_future( stream, self.handle_connection_established )
+            self.stream = None
+        else:
+            self.stream = stream
+            self._set_handlers()
     
-    def recv(self):
-        self.buf = self.buf + self.sock.recv(4096)
-        return len(self.buf)
+    def handle_connection_established(self, f):
+        if f.exception() is not None:
+            self.handle_close()
+            return
         
-    def send(self, msg):
-        self.sock.sendall( msg ) 
-        
-    def cut_buf(self, cut_len ):
-        if cut_len < len(self.buf):
-            self.buf = self.buf[cut_len:]
-        else:
-            self.buf = b''
-
-class TCPConnPair(connection.ConnPair):
-    def recv(self, sock):
-        conn = self._find_conn( sock )
-        send_conn = self.connections[1] if conn is self.connections[0] \
-                else self.connections[0]
-        
-        msg_len = conn.recv()
-        if msg_len != 0:
-            send_conn.send( conn.buf )
-            conn.cut_buf( msg_len )
-        else:
-            return False
-        return True
+        self.stream = f.result()
+        self._set_handlers()
+        self.write() 
+    
+    def handle_read(self, data):
+        LOG.debug("Read: {0}".format(repr(data)))
+        self.stream.read_bytes(4096, callback=self.handle_read, partial=True)
+        self.streampair.handle_read( self, data )
+    
+    def write(self, data=None):
+        if data is not None:
+            LOG.debug("Write: {0}".format(repr(data)))
+            self._write_buf = self._write_buf + data
+        if self.stream is not None:
+            self.stream.write( self._write_buf )
+            self._write_buf = b''
     
     def close(self):
-        for conn in self.connections:
-            conn.sock.close()
-        super(TCPConnPair, self).close()
+        if self.stream is not None:
+            self.stream.close(self)
+        
+    def handle_close(self):
+        self.streampair.close(self)
+
+    def _set_handlers(self):
+        self.stream.read_bytes(4096, callback=self.handle_read, partial=True)
+        self.stream.set_close_callback( self.handle_close )
+        
+
+class TCPStreamPair():
+    def __init__(self):
+        self.streams = []
+        self.close_handler = None
+    
+    def stream_add(self, streamhandler ):
+        self.streams.append( streamhandler )
+    
+    def handle_read(self, stream, data ):
+        send_stream = self.streams[1] if stream is self.streams[0] \
+                            else self.streams[0]
+        
+        send_stream.write( data )
+    
+    def close(self, stream ):
+        for s in self.streams:
+            s.close()
+        if self.close_handler is not None:
+            self.close_handler( self )
+    
+    def set_close_handler(self, handler ):
+        self.close_handler = handler

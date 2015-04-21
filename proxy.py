@@ -1,91 +1,38 @@
-import socket
-import select
+import tornado.tcpserver
+import tornado.tcpclient
 
-TCP_CONNECT_TIMEOUT = 3
-
-class ConnPairs():
+class StreamPairs():
     def __init__(self):
         self.pairs = []
-        self.sock_index = {}
     
     def add(self, pair):
         if pair not in self.pairs:
             self.pairs.append( pair )
-            for sock in pair.socks:
-                self.sock_index[sock] = pair
     
     def remove(self, pair):
         if pair in self.pairs:
             self.pairs.remove( pair )
-            for sock in pair.socks:
-                del self.sock_index[sock]
-    
-    def find_pair(self, sock):
-        return self.sock_index[sock]
         
+class ProxyServer(tornado.tcpserver.TCPServer):
+   def __init__(self, connect_addr, connect_port, streamhandler, streampair, streampairs):
+       super().__init__()
+       self.connect_addr = connect_addr
+       self.connect_port = connect_port
+       self.streamhandler = streamhandler
+       self.streampair = streampair
+       self.streampairs = streampairs()
+       self.tcpclient = tornado.tcpclient.TCPClient()
 
-class ConnProxy():
-    def __init__(self, listen_addr, listen_port, connect_addr, connect_port,
-            conn, connpair ):
-        self.listen_addr = listen_addr
-        self.listen_port = listen_port
-        self.connect_addr = connect_addr
-        self.connect_port = connect_port
-        
-        if conn is None:
-            self.conn = TCPConn
-        else:
-            self.conn = conn
-        
-        if connpair is None:
-            self.connpair = TCPConnPair
-        else:
-            self.connpair = connpair
+   def handle_stream(self, stream, address ):
+        newpair = self.streampair()
+        newpair.set_close_handler( self.handle_close )
 
-        self.read_socks = []
-        self.pairs = ConnPairs()
-
-    def start(self):
-        self.serversock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        self.read_socks.append( self.serversock )
-
-        self.serversock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-        self.serversock.bind( (self.listen_addr, self.listen_port) )
-        self.serversock.listen(5)
-    
-    def run(self):
-        while True:
-            rready, wready, errready = select.select( self.read_socks, [], [] )
-            for sock in rready:
-                if sock is self.serversock:
-                   self.on_accept( sock )
-                else:
-                    pair = self.pairs.find_pair( sock )
-                    if not pair.recv( sock ):
-                        self.on_close( pair )
-                    
-    def on_accept(self, sock):
-        newpair = self.connpair()
-
-        clientsock, address = sock.accept()
-        newpair.conn_add( self.conn( clientsock ) )
+        newpair.stream_add( self.streamhandler( stream, newpair ) )
        
-        try: 
-            sock_connect = socket.create_connection(
-                (self.connect_addr, self.connect_port), TCP_CONNECT_TIMEOUT )
-        except OSError as msg:
-            self.on_close( newpair )
-            return
-
-        newpair.conn_add( self.conn( sock_connect ) )
+        stream_connect = self.tcpclient.connect( self.connect_addr, self.connect_port )
+        newpair.stream_add( self.streamhandler( stream_connect, newpair ) )
         
-        self.pairs.add( newpair )
-        self.read_socks.extend( newpair.socks )
+        self.streampairs.add( newpair )
     
-    def on_close(self, pair ):
-        for sock in pair.socks:
-            if sock in self.read_socks:
-                self.read_socks.remove( sock )
-
-        pair.close()
-        self.pairs.remove( pair )
+   def handle_close(self, pair ):
+        self.streampairs.remove( pair )
