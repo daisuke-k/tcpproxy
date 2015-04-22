@@ -36,8 +36,11 @@ class ProxyServer(tornado.tcpserver.TCPServer):
        
         new_stream_handler = self.streamhandler( newpair )
         newpair.stream_add( new_stream_handler )
-        stream_connect = yield self.tcpclient.connect( self.connect_addr, self.connect_port )
-        new_stream_handler.set_stream( stream_connect )
+        try:
+            stream_connect = yield self.tcpclient.connect( self.connect_addr, self.connect_port )
+            new_stream_handler.set_stream( stream_connect )
+        except ConnectionError:
+            newpair.close()
     
    def handle_close(self, pair ):
         self.streampairs.remove( pair )

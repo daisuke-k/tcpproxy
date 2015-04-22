@@ -41,7 +41,7 @@ class TCPStreamHandler():
             self.stream.close(self)
         
     def handle_close(self):
-        self.streampair.close(self)
+        self.streampair.close()
 
     def _set_handlers(self):
         self.stream.read_bytes(4096, callback=self.handle_read, partial=True)
@@ -62,7 +62,7 @@ class TCPStreamPair():
         
         send_stream.write( data )
     
-    def close(self, stream ):
+    def close(self ):
         for s in self.streams:
             s.close()
         if self.close_handler is not None:
