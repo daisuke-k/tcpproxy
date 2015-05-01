@@ -1,4 +1,6 @@
-import tornado.ioloop
+#import tornado.ioloop
+import tornado.gen
+import tornado.iostream
 import logging
 
 LOG=logging.getLogger(__name__)
@@ -6,47 +8,44 @@ LOG=logging.getLogger(__name__)
 class TCPStreamHandler():
     def __init__(self, streampair ):
         self.streampair = streampair
-        self._write_buf = b''
         self.stream = None
+        self.address = ""
         
-    def set_stream(self, stream ):
+    def set_stream(self, stream, address ):
         self.stream = stream
-        self._set_handlers()
-        self.write()
-    
-    def handle_connection_established(self, f):
-        if f.exception() is not None:
-            self.handle_close()
-            return
+        self.address = address
+        LOG.debug("Set a stream for {0}".format(address))
+        self.run_read()
         
-        self.stream = f.result()
-        self._set_handlers()
-        self.write() 
+    def receive(self, data ):
+        return data
     
-    def handle_read(self, data):
-        LOG.debug("Read: {0}".format(repr(data)))
-        self.stream.read_bytes(4096, callback=self.handle_read, partial=True)
-        self.streampair.handle_read( self, data )
-    
+    @tornado.gen.coroutine 
+    def run_read(self):
+        while True:
+            try:
+                LOG.debug("Waiting for data...")
+                data = yield self.stream.read_bytes(8, partial=True)
+                LOG.debug("Read: {0}".format(repr(data)))
+
+                msg = self.receive( data )
+                self.streampair.handle_read( self, msg )
+            except tornado.iostream.StreamClosedError:
+                LOG.debug("Connection to {0} is closed".format(self.address))
+                self.streampair.close()
+                break
+
+    def send(self, data ):
+        self.write( data )
+         
     def write(self, data=None):
-        if data is not None:
-            LOG.debug("Write: {0}".format(repr(data)))
-            self._write_buf = self._write_buf + data
+        LOG.debug("Write: {0}".format(repr(data)))
         if self.stream is not None:
-            self.stream.write( self._write_buf )
-            self._write_buf = b''
+            self.stream.write( data )
     
     def close(self):
         if self.stream is not None:
             self.stream.close(self)
-        
-    def handle_close(self):
-        self.streampair.close()
-
-    def _set_handlers(self):
-        self.stream.read_bytes(4096, callback=self.handle_read, partial=True)
-        self.stream.set_close_callback( self.handle_close )
-        
 
 class TCPStreamPair():
     def __init__(self):
@@ -60,7 +59,7 @@ class TCPStreamPair():
         send_stream = self.streams[1] if stream is self.streams[0] \
                             else self.streams[0]
         
-        send_stream.write( data )
+        send_stream.send( data )
     
     def close(self ):
         for s in self.streams:
