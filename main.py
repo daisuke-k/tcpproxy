@@ -2,12 +2,16 @@
 
 import argparse
 import logging
+import signal
 
 import tornado.ioloop
 
 import proxy
 import tcp
 
+def on_sigint():
+    print("Shutdown by keyboard interruption")
+    tornado.ioloop.IOLoop.instance().stop()
 
 def port_expression( string ):
     separated = string.rsplit(":", 1)
@@ -28,4 +32,8 @@ if __name__ == '__main__':
                          tcp.TCPStreamPair, proxy.StreamPairs )
     server.listen( args.listen[1], address=args.listen[0] )
 
-    tornado.ioloop.IOLoop.instance().start()
+    ioloop = tornado.ioloop.IOLoop.instance()
+
+    signal.signal( signal.SIGINT, lambda sig, froame: ioloop.add_callback_from_signal(on_sigint) )
+
+    ioloop.start()
