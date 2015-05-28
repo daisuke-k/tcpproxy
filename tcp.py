@@ -30,6 +30,8 @@ class TCPStreamHandler():
 
                 msg = self.receive( data )
                 self.streampair.handle_read( self, msg )
+
+                yield tornado.gen.moment
             except tornado.iostream.StreamClosedError:
                 LOG.debug("Connection to {0} is closed".format(self.address))
                 self.streampair.close()
